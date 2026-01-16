@@ -12,21 +12,22 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 @app.post("/update_account")
 async def update_account(data: dict):
     try:
-        # พิมพ์ดูข้อมูลที่ส่งมา (ทางหน้าจอ Log ของ Render)
+        # พิมพ์ log ดูข้อมูลที่เข้า (ดูได้ในหน้า Log ของ Render)
         print(f"Syncing Account: {data.get('account_number')}")
         
-        # แก้ไขบรรทัดนี้: เพิ่ม on_conflict เพื่อบอกว่าถ้าเลขพอร์ตซ้ำ ให้ทับข้อมูลเดิม
+        # เปลี่ยนเป็น upsert และระบุ on_conflict เพื่อให้ทับข้อมูลเดิมที่พอร์ตตรงกัน
         response = supabase.table("accounts").upsert(
             {
                 "account_number": str(data.get("account_number")),
                 "balance": float(data.get("balance", 0)),
                 "equity": float(data.get("equity", 0)),
                 "current_price": float(data.get("current_price", 0)),
-                "updated_at": "now()" # บันทึกเวลาที่อัปเดตล่าสุด
+                "updated_at": "now()" 
             },
-            on_conflict="account_number"  # <--- จุดสำคัญคือบรรทัดนี้ครับ
+            on_conflict="account_number"  # <--- ส่วนสำคัญที่สุดคือบรรทัดนี้ครับ
         ).execute()
         
         return {"status": "success", "data": response.data}
     except Exception as e:
+        print(f"Error logic: {e}")
         return {"status": "error", "message": str(e)}
