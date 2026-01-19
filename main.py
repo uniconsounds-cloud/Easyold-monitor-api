@@ -1,33 +1,82 @@
-from fastapi import FastAPI
+import os
+from fastapi import FastAPI, HTTPException
 from supabase import create_client, Client
-import json
+from pydantic import BaseModel
+from typing import List, Optional, Dict
 
 app = FastAPI()
 
-# ใส่ค่าจาก Settings > API ใน Supabase ของคุณ
-SUPABASE_URL = "https://jiwtorjzszrybfxztasm.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imppd3Rvcmp6c3pyeWJmeHp0YXNtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MzQ1OTUsImV4cCI6MjA4NDExMDU5NX0.pTL5ZARYH5thEMDHHbaxBQdgoo5GEHGe08bXYQ2VKeY"
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# เชื่อมต่อกับ Supabase ผ่าน Environment Variables
+url: str = os.environ.get("SUPABASE_URL")
+key: str = os.environ.get("SUPABASE_KEY")
+supabase: Client = create_client(url, key)
 
+# --- กลุ่มที่ 1: Endpoint สำหรับ Snapshot (Real-time) ---
 @app.post("/update_account")
-async def update_account(data: dict):
+async def update_account(data: Dict):
     try:
-        # พิมพ์ log ดูข้อมูลที่เข้า (ดูได้ในหน้า Log ของ Render)
-        print(f"Syncing Account: {data.get('account_number')}")
-        
-        # เปลี่ยนเป็น upsert และระบุ on_conflict เพื่อให้ทับข้อมูลเดิมที่พอร์ตตรงกัน
+        # ใช้ระบบ Upsert (ถ้ามีเลขพอร์ตเดิมให้ทับ ถ้าไม่มีให้สร้างใหม่)
         response = supabase.table("accounts").upsert(
             {
                 "account_number": str(data.get("account_number")),
+                "owner_name": data.get("owner_name"),
+                "account_nickname": data.get("account_nickname"),
+                "broker_name": data.get("broker_name"),
+                "symbol": data.get("symbol"),
                 "balance": float(data.get("balance", 0)),
                 "equity": float(data.get("equity", 0)),
                 "current_price": float(data.get("current_price", 0)),
-                "updated_at": "now()" 
+                "buy_count": int(data.get("buy_count", 0)),
+                "buy_lots": float(data.get("buy_lots", 0)),
+                "sell_count": int(data.get("sell_count", 0)),
+                "sell_lots": float(data.get("sell_lots", 0)),
+                "orders_json": data.get("orders_json", []),
+                "updated_at": "now()"
             },
-            on_conflict="account_number"  # <--- ส่วนสำคัญที่สุดคือบรรทัดนี้ครับ
+            on_conflict="account_number"
         ).execute()
-        
-        return {"status": "success", "data": response.data}
+        return {"status": "success", "type": "snapshot", "data": response.data}
     except Exception as e:
-        print(f"Error logic: {e}")
-        return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- กลุ่มที่ 2: Endpoint สำหรับสถิติรายวัน (Daily Stats) ---
+@app.post("/update_daily")
+async def update_daily(data: Dict):
+    try:
+        response = supabase.table("daily_stats").upsert(
+            {
+                "account_number": str(data.get("account_number")),
+                "record_date": data.get("record_date"), # รูปแบบ YYYY-MM-DD
+                "symbol": data.get("symbol"),
+                "daily_profit": float(data.get("daily_profit", 0)),
+                "daily_lots": float(data.get("daily_lots", 0)),
+                "daily_max_drawdown": float(data.get("daily_max_drawdown", 0))
+            },
+            on_conflict="account_number,record_date"
+        ).execute()
+        return {"status": "success", "type": "daily", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- กลุ่มที่ 3: Endpoint สำหรับประวัติการรวบไม้ (Closing Cycles) ---
+@app.post("/add_cycle")
+async def add_cycle(data: Dict):
+    try:
+        response = supabase.table("closing_cycles").insert({
+            "account_number": str(data.get("account_number")),
+            "magic_number": int(data.get("magic_number", 0)),
+            "symbol": data.get("symbol"),
+            "total_profit": float(data.get("total_profit", 0)),
+            "total_lots": float(data.get("total_lots", 0)),
+            "order_count": int(data.get("order_count", 0)),
+            "start_time": data.get("start_time"),
+            "end_time": data.get("end_time"),
+            "closed_orders_json": data.get("closed_orders_json", [])
+        }).execute()
+        return {"status": "success", "type": "cycle", "data": response.data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/")
+def read_root():
+    return {"message": "Forex Multi-Port API is running!"}
