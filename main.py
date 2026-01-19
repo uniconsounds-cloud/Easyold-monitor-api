@@ -15,7 +15,7 @@ supabase: Client = create_client(url, key)
 @app.post("/update_account")
 async def update_account(data: Dict):
     try:
-        # ใช้ระบบ Upsert (ถ้ามีเลขพอร์ตเดิมให้ทับ ถ้าไม่มีให้สร้างใหม่)
+        # ตัด "updated_at": "now()" ออกเพื่อให้ฐานข้อมูลจัดการเองอัตโนมัติ
         response = supabase.table("accounts").upsert(
             {
                 "account_number": str(data.get("account_number")),
@@ -30,13 +30,14 @@ async def update_account(data: Dict):
                 "buy_lots": float(data.get("buy_lots", 0)),
                 "sell_count": int(data.get("sell_count", 0)),
                 "sell_lots": float(data.get("sell_lots", 0)),
-                "orders_json": data.get("orders_json", []),
-                "updated_at": "now()"
+                "orders_json": data.get("orders_json", [])
             },
             on_conflict="account_number"
         ).execute()
-        return {"status": "success", "type": "snapshot", "data": response.data}
+        return {"status": "success", "data": response.data}
     except Exception as e:
+        # พิมพ์ Error ออกมาในหน้า Logs ของ Render เพื่อให้เราตรวจสอบได้ง่ายขึ้น
+        print(f"❌ Database Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # --- กลุ่มที่ 2: Endpoint สำหรับสถิติรายวัน (Daily Stats) ---
